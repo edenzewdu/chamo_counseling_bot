@@ -1,305 +1,170 @@
+import telebot
+from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import logging
 import json
-from typing import Final
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, filters
+import os
+from datetime import datetime
 
-TOKEN: Final = '..'
-BOT_USERNAME: Final = '..'
-DATA_FILE: Final = 'counselors.json'
-client_sessions = {}
-counselors = {}
-super_admin_id = ..
+# Bot setup and token configuration
+API_TOKEN = 'YOUR_BOT_API_TOKEN'  # Replace with your bot's API token
+GROUP_CHAT_ID = -100YOUR_GROUP_ID  # Replace with your group chat ID
+admins = [ADMIN_ID, ]  # Replace with actual admin IDs
 
+bot = telebot.TeleBot(API_TOKEN)
+logging.basicConfig(level=logging.INFO)
+
+# File to store counselor data
+COUNSELOR_FILE = 'counselors.json'
+SESSION_LOG_DIR = 'sessions'
+
+# Load or initialize counselors
+if not os.path.exists(COUNSELOR_FILE):
+    with open(COUNSELOR_FILE, 'w') as f:
+        json.dump([], f)
+
+# Helper function to load counselors
 def load_counselors():
-    global counselors
-    try:
-        with open(DATA_FILE, 'r') as file:
-            counselors = json.load(file)
-    except (FileNotFoundError, json.JSONDecodeError):
-        counselors = {}
+    with open(COUNSELOR_FILE, 'r') as f:
+        return json.load(f)
 
-def save_counselors():
-    with open(DATA_FILE, 'w') as file:
-        json.dump(counselors, file)
+# Helper function to save counselors
+def save_counselors(counselors):
+    with open(COUNSELOR_FILE, 'w') as f:
+        json.dump(counselors, f, indent=4)
 
-# Start Command Handler
-async def start(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    if user.id == super_admin_id:
-        await context.bot.send_message(chat_id=update.effective_chat.id,
-                                       text="Welcome Super Admin! You can register counselors using /register_counselor.",
-                                       reply_markup=ReplyKeyboardMarkup([['Register Counselor'], ['View Counselors']], one_time_keyboard=True))
-    elif user.username in counselors:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello Counselor, you are now active!")
-    else:
-        await context.bot.send_message(chat_id=update.effective_chat.id,
-                                       text="Welcome to the counseling bot! Please choose an option:",
-                                       reply_markup=ReplyKeyboardMarkup([['Start One-on-One Counseling'], ['Join Group Counseling'], ['Change Counselor']], one_time_keyboard=True))
-
-# General message handler
-async def handle_message(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    if user.username not in counselors:
-        option = update.message.text
-        if option == "Start One-on-One Counseling":
-            await assign_counselor(update, context, one_on_one=True)
-        elif option == "Join Group Counseling":
-            await choose_group_option(update, context)
-        elif option == "Change Counselor":
-            await change_counselor(update, context)
-        else:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid option.")
-    else:
-        await forward_to_client(update, context)
-
-# Group counseling options
-async def choose_group_option(update: Update, context: CallbackContext):
-    """Presents the user with options for group counseling."""
-    client_id = update.effective_chat.id
-    await context.bot.send_message(chat_id=client_id,
-                                   text="Choose your group counseling option:",
-                                   reply_markup=ReplyKeyboardMarkup([['Private with Counselors'], ['Public Discussion']], one_time_keyboard=True))
-
-# Assign counselor
-async def assign_counselor(update: Update, context: CallbackContext, one_on_one=False):
-    client_id = update.effective_chat.id
-    if counselors:
-        counselor_username = list(counselors.keys())[0]  # Assign the first available counselor
-        client_sessions[client_id] = {
-            'counselor': counselor_username,
-            'counselor_chat_id': counselors[counselor_username],
-            'session_type': 'one_on_one' if one_on_one else 'group'
-        }
-        await context.bot.send_message(chat_id=client_id, text=f"You have been connected to counselor @{counselor_username}.")
-        await context.bot.send_message(chat_id=counselors[counselor_username], text="You have a new client.")
-    else:
-        await context.bot.send_message(chat_id=client_id, text="No counselors are available at the moment.")
-
-# Forward counselor's message to client
-async def forward_to_client(update: Update, context: CallbackContext):
-    counselor_username = update.message.from_user.username
-    for client_id, session in client_sessions.items():
-        if session['counselor'] == counselor_username:
-            await context.bot.send_message(chat_id=client_id, text=update.message.text)
-
-# Change counselor
-async def change_counselor(update: Update, context: CallbackContext):
-    client_id = update.effective_chat.id
-    current_session = client_sessions.get(client_id)
-    if current_session:
-        await context.bot.send_message(chat_id=current_session['counselor_chat_id'],
-                                       text="The client has requested a change of counselor.")
-        del client_sessions[client_id]
-        await assign_counselor(update, context)
-    else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not currently assigned to any counselor.")
-
-# Register a counselor by Super Admin
-async def register_counselor(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    if user.id != super_admin_id:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to register counselors.")
+# Register a new counselor (admin only)
+@bot.message_handler(commands=['register_counselor'])
+def register_counselor(message):
+    if message.from_user.id not in admins:
+        bot.reply_to(message, "You are not authorized to perform this action.")
         return
 
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please provide the counselor's user ID.")
-    context.user_data['pending_registration'] = True  # Set the state for registration
+    msg = bot.reply_to(message, "Enter the counselor's username:")
+    bot.register_next_step_handler(msg, save_counselor)
 
-# Handle the counselor's user ID input
-async def handle_counselor_user_id(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    if user.id != super_admin_id:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to perform this action.")
-        return
-
-    if 'pending_registration' not in context.user_data:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="No counselor registration is in progress.")
-        return
-
-    try:
-        counselor_user_id = int(update.message.text)
-        context.user_data['pending_counselor_user_id'] = counselor_user_id
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the username of the counselor.")
-    except ValueError:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid user ID. Please provide a valid number.")
-
-# Handle the counselor's username input
-async def handle_counselor_username(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    if user.id != super_admin_id:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to perform this action.")
-        return
-
-    if 'pending_counselor_user_id' not in context.user_data:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="Please provide the user ID first.")
-        return
-
-    counselor_username = update.message.text.strip('@')
-    counselor_user_id = context.user_data['pending_counselor_user_id']
-
-    if counselor_username in counselors:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Counselor @{counselor_username} is already registered.")
+def save_counselor(message):
+    username = message.text
+    counselors = load_counselors()
+    if any(c['username'] == username for c in counselors):
+        bot.reply_to(message, f"Counselor @{username} is already registered.")
     else:
-        counselors[counselor_username] = counselor_user_id
-        save_counselors()  # Save counselors to file
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Counselor @{counselor_username} has been registered with user ID {counselor_user_id}.")
-    
-    context.user_data.pop('pending_registration', None)
-    context.user_data.pop('pending_counselor_user_id', None)
+        counselors.append({"username": username, "assigned": False})
+        save_counselors(counselors)
+        bot.reply_to(message, f"Counselor @{username} registered successfully.")
 
-# View counselors
-async def view_counselors(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    if user.id != super_admin_id:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to view counselors.")
+# Delete a counselor (admin only)
+@bot.message_handler(commands=['delete_counselor'])
+def delete_counselor(message):
+    if message.from_user.id not in admins:
+        bot.reply_to(message, "You are not authorized to perform this action.")
         return
 
-    if counselors:
-        counselor_list = "\n".join([f"@{username}" for username in counselors.keys()])
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Registered Counselors:\n{counselor_list}")
+    msg = bot.reply_to(message, "Enter the username of the counselor to delete:")
+    bot.register_next_step_handler(msg, remove_counselor)
+
+def remove_counselor(message):
+    username = message.text
+    counselors = load_counselors()
+    counselors = [c for c in counselors if c['username'] != username]
+    save_counselors(counselors)
+    bot.reply_to(message, f"Counselor @{username} has been removed.")
+
+# Start a one-on-one counseling session
+@bot.message_handler(commands=['request_counseling'])
+def request_counseling(message):
+    user_id = message.from_user.id
+    anonymous_name = f"User_{user_id}"
+
+    # Assign the first available counselor
+    counselors = load_counselors()
+    available_counselor = next((c for c in counselors if not c['assigned']), None)
+
+    if available_counselor:
+        available_counselor['assigned'] = True
+        save_counselors(counselors)
+        bot.reply_to(message, f"You've been assigned to counselor @{available_counselor['username']}.")
+        
+        # Notify admin
+        for admin_id in admins:
+            bot.send_message(admin_id, f"{anonymous_name} has been assigned to counselor @{available_counselor['username']}.")
+
+        # Start session logging
+        session_id = f"{anonymous_name}_{available_counselor['username']}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        start_session(user_id, available_counselor['username'], session_id)
     else:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="No counselors registered yet.")
+        bot.reply_to(message, "No counselors are currently available. Please try again later.")
 
-# Main function
-def main():
-    load_counselors()  # Load counselors from the file at startup
+# Start and save a session
+def start_session(user_id, counselor_username, session_id):
+    if not os.path.exists(SESSION_LOG_DIR):
+        os.makedirs(SESSION_LOG_DIR)
 
-    application = Application.builder().token(TOKEN).build()
+    session_file = os.path.join(SESSION_LOG_DIR, f"{session_id}.txt")
+    with open(session_file, 'w') as f:
+        f.write(f"Session started between {user_id} and counselor @{counselor_username}\n")
 
-    # Handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("register_counselor", register_counselor))
-    application.add_handler(CommandHandler("view_counselors", view_counselors))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_counselor_user_id))  # Handle user ID input
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_counselor_username))  # Handle username input
+    bot.send_message(user_id, "You are now in a session with your counselor. Please start sharing.")
 
-    application.run_polling()
+    # Track the session
+    user_data[user_id] = {'counselor': counselor_username, 'session_file': session_file}
 
-if __name__ == "__main__":
-    main()
+# Log user messages to session file
+@bot.message_handler(func=lambda message: message.chat.id in user_data)
+def log_session_message(message):
+    user_id = message.chat.id
+    session_info = user_data[user_id]
+    session_file = session_info['session_file']
 
+    with open(session_file, 'a') as f:
+        f.write(f"{message.text}\n")
 
-# from typing import Final
-# from telegram import Update, ReplyKeyboardMarkup
-# from telegram.ext import Application, CommandHandler, MessageHandler, CallbackContext, filters
+    bot.send_message(user_id, "Message received by counselor.")
 
-# TOKEN: Final = '7870966451:AAF-KujeDLKCR8k1zTN7Kl1NSvhxraaw2iU'
-# BOT_USERNAME: Final = '@chamocounselingbot'
+# Request counselor change
+@bot.message_handler(commands=['change_counselor'])
+def request_change_counselor(message):
+    user_id = message.from_user.id
+    anonymous_name = f"User_{user_id}"
 
-# # Dictionary to store client-to-counselor mapping and active counselors
-# client_sessions = {}
-# counselors = {}  # Store active counselors with chat IDs
-# super_admin_username = 'https://t.me/edenZee'  # Replace with actual Super Admin's Telegram username
+    if user_id in user_data:
+        current_counselor = user_data[user_id]['counselor']
+        bot.send_message(user_id, "Request sent to admin for a new counselor assignment.")
+        
+        # Notify admin for reassignment approval
+        for admin_id in admins:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("Approve Change", callback_data=f"approve_change_{user_id}"))
+            bot.send_message(admin_id, f"{anonymous_name} has requested a new counselor instead of @{current_counselor}.", reply_markup=markup)
+    else:
+        bot.reply_to(message, "You are not currently in a session.")
 
+# Admin approval for counselor change
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_change_"))
+def approve_counselor_change(call):
+    user_id = int(call.data.split("_")[2])
+    anonymous_name = f"User_{user_id}"
+    current_counselor = user_data[user_id]['counselor']
 
-# async def start(update: Update, context: CallbackContext):
-#     user = update.message.from_user
-#     if user.username == super_admin_username:
-#         await context.bot.send_message(chat_id=update.effective_chat.id,
-#                                        text="Welcome Super Admin! You can register counselors using /register_counselor.",
-#                                        reply_markup=ReplyKeyboardMarkup([['Register Counselor'], ['View Counselors']], one_time_keyboard=True))
-#     elif user.username in counselors:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text="Hello Counselor, you are now active!")
-#     else:
-#         await context.bot.send_message(chat_id=update.effective_chat.id,
-#                                        text="Welcome to the counseling bot! Please choose an option:",
-#                                        reply_markup=ReplyKeyboardMarkup([['Start Counseling'], ['Change Counselor']], one_time_keyboard=True))
+    # Make current counselor available
+    counselors = load_counselors()
+    for c in counselors:
+        if c['username'] == current_counselor:
+            c['assigned'] = False
+            break
+    save_counselors(counselors)
 
+    # Reassign new counselor
+    available_counselor = next((c for c in counselors if not c['assigned']), None)
+    if available_counselor:
+        available_counselor['assigned'] = True
+        save_counselors(counselors)
 
-# async def handle_message(update: Update, context: CallbackContext):
-#     user = update.message.from_user
-#     if user.username not in counselors:
-#         # Handle client messages
-#         option = update.message.text
-#         if option == "Start Counseling":
-#             await assign_counselor(update, context)
-#         elif option == "Change Counselor":
-#             await change_counselor(update, context)
-#         else:
-#             await context.bot.send_message(chat_id=update.effective_chat.id, text="Invalid option.")
-#     else:
-#         # Handle counselor messages, forward them to the respective client
-#         await forward_to_client(update, context)
-
-
-# async def assign_counselor(update: Update, context: CallbackContext):
-#     client_id = update.effective_chat.id
-#     if counselors:
-#         counselor_username = list(counselors.keys())[0]  # Assign the first available counselor
-#         client_sessions[client_id] = {
-#             'counselor': counselor_username,
-#             'counselor_chat_id': counselors[counselor_username]
-#         }
-#         await context.bot.send_message(chat_id=client_id, text=f"You have been connected to counselor @{counselor_username}.")
-#         await context.bot.send_message(chat_id=counselors[counselor_username], text="You have a new client.")
-#     else:
-#         await context.bot.send_message(chat_id=client_id, text="No counselors are available at the moment.")
-
-
-# async def forward_to_client(update: Update, context: CallbackContext):
-#     counselor_username = update.message.from_user.username
-#     for client_id, session in client_sessions.items():
-#         if session['counselor'] == counselor_username:
-#             await context.bot.send_message(chat_id=client_id, text=update.message.text)
-
-
-# async def change_counselor(update: Update, context: CallbackContext):
-#     client_id = update.effective_chat.id
-#     current_session = client_sessions.get(client_id)
-#     if current_session:
-#         await context.bot.send_message(chat_id=current_session['counselor_chat_id'],
-#                                        text="The client has requested a change of counselor.")
-#         del client_sessions[client_id]
-#         await assign_counselor(update, context)
-#     else:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not currently assigned to any counselor.")
-
-
-# async def register_counselor(update: Update, context: CallbackContext):
-#     """Allows Super Admin to register a new counselor."""
-#     user = update.message.from_user
-#     if user.username != super_admin_username:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to register counselors.")
-#         return
-
-#     if len(context.args) != 1:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text="Usage: /register_counselor <username>")
-#         return
-
-#     counselor_username = context.args[0]
-#     if counselor_username in counselors:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Counselor @{counselor_username} is already registered.")
-#     else:
-#         counselors[counselor_username] = update.effective_chat.id  # Store counselor chat ID
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Counselor @{counselor_username} has been registered.")
-
-
-# async def view_counselors(update: Update, context: CallbackContext):
-#     """Allows Super Admin to view all registered counselors."""
-#     user = update.message.from_user
-#     if user.username != super_admin_username:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text="You are not authorized to view counselors.")
-#         return
-
-#     if counselors:
-#         counselor_list = "\n".join([f"@{username}" for username in counselors.keys()])
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Registered Counselors:\n{counselor_list}")
-#     else:
-#         await context.bot.send_message(chat_id=update.effective_chat.id, text="No counselors registered yet.")
-
-
-# def main():
-#     application = Application.builder().token(TOKEN).build()
-
-#     # Handlers
-#     application.add_handler(CommandHandler("start", start))
-#     application.add_handler(CommandHandler("register_counselor", register_counselor))
-#     application.add_handler(CommandHandler("view_counselors", view_counselors))
-#     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-#     # Start polling
-#     application.run_polling()
-
-
-# if __name__ == '__main__':
-#     main()
+        # Update session information
+        user_data[user_id]['counselor'] = available_counselor['username']
+        bot.send_message(user_id, f"You've been reassigned to counselor @{available_counselor['username']}.")
+        
+        # Notify admin
+        bot.send_message(call.message.chat.id, f"{anonymous_name} has been reassigned to counselor @{available_counselor['username']}.")
+    else:
+        bot.send_message(call.message.chat.id, "No counselors are available for reassignment.")
