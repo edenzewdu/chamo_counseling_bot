@@ -18,10 +18,19 @@ logging.basicConfig(level=logging.INFO)
 COUNSELOR_FILE = 'counselors.json'
 SESSION_LOG_DIR = 'sessions'
 
-# Load or initialize counselors
+# Initialize topic IDs (add your topic data as needed)
+topics = {
+    "TOPICS": "TOPICS_ID",  # Placeholder - update as required
+}
+user_data = {}
+reply_data = {}
+
+# Ensures counselors file and sessions directory exist
 if not os.path.exists(COUNSELOR_FILE):
     with open(COUNSELOR_FILE, 'w') as f:
         json.dump([], f)
+if not os.path.exists(SESSION_LOG_DIR):
+    os.makedirs(SESSION_LOG_DIR)
 
 # Helper function to load counselors
 def load_counselors():
@@ -97,27 +106,22 @@ def request_counseling(message):
 
 # Start and save a session
 def start_session(user_id, counselor_username, session_id):
-    if not os.path.exists(SESSION_LOG_DIR):
-        os.makedirs(SESSION_LOG_DIR)
-
     session_file = os.path.join(SESSION_LOG_DIR, f"{session_id}.txt")
     with open(session_file, 'w') as f:
         f.write(f"Session started between {user_id} and counselor @{counselor_username}\n")
 
     bot.send_message(user_id, "You are now in a session with your counselor. Please start sharing.")
-
-    # Track the session
     user_data[user_id] = {'counselor': counselor_username, 'session_file': session_file}
 
 # Log user messages to session file
-@bot.message_handler(func=lambda message: message.chat.id in user_data)
+@bot.message_handler(func=lambda message: message.from_user.id in user_data)
 def log_session_message(message):
-    user_id = message.chat.id
+    user_id = message.from_user.id
     session_info = user_data[user_id]
     session_file = session_info['session_file']
 
     with open(session_file, 'a') as f:
-        f.write(f"{message.text}\n")
+        f.write(f"{datetime.now()} - {message.text}\n")
 
     bot.send_message(user_id, "Message received by counselor.")
 
@@ -159,12 +163,12 @@ def approve_counselor_change(call):
     if available_counselor:
         available_counselor['assigned'] = True
         save_counselors(counselors)
-
-        # Update session information
         user_data[user_id]['counselor'] = available_counselor['username']
         bot.send_message(user_id, f"You've been reassigned to counselor @{available_counselor['username']}.")
-        
-        # Notify admin
         bot.send_message(call.message.chat.id, f"{anonymous_name} has been reassigned to counselor @{available_counselor['username']}.")
     else:
         bot.send_message(call.message.chat.id, "No counselors are available for reassignment.")
+
+# Start polling
+bot.polling()
+
