@@ -10,26 +10,23 @@ import os
 from datetime import datetime
 
 # Bot setup and token configuration
-API_TOKEN = 'YOUR_BOT_API_TOKEN'  # Replace with your bot's API token
-GROUP_CHAT_ID = -100YOUR_GROUP_ID  # Replace with your group chat ID
-admins = [ADMIN_ID, ]  # Replace with actual admin IDs
-
+API_TOKEN = '7870966451:AAF-KujeDLKCR8k1zTN7Kl1NSvhxraaw2iU'  # Replace with your bot's API token
+GROUP_CHAT_ID = -1002454936996  # Replace with your group chat ID
+admins = [709031839]  # Replace with actual admin IDs
+api_id = '28876058'
+api_hash = '105f9eb8bc22ceb71590be9afb3a1e31'
+# Set up the Telethon client and bot
+client = TelegramClient('session_name', api_id, api_hash, timeout=10)
 bot = telebot.TeleBot(API_TOKEN)
 logging.basicConfig(level=logging.INFO)
 
 # File to store counselor data
 COUNSELOR_FILE = 'counselors.json'
 SESSION_LOG_DIR = 'sessions'
-api_id = 'YOUR_API_ID'  # Replace with your actual API ID
-api_hash = 'YOUR_API_HASH'  # Replace with your actual API Hash
-# Set up the Telethon client and bot
-client = TelegramClient('session_name', api_id, api_hash, timeout=10)
-bot = telebot.TeleBot(API_TOKEN)
-logging.basicConfig(level=logging.INFO)
-
 
 # Initialize topic IDs (add your topic data as needed)
 topics = {}
+
 user_data = {}
 reply_data = {}
 
@@ -66,16 +63,22 @@ def save_counselors(counselors):
         json.dump(counselors, f, indent=4)
 
 def send_welcome(message):
-    if message.text.startswith("/start reply_"):
-        handle_deep_link_reply(message)
+    # Determine the role of the user
+    if message.from_user.id in admins:
+        welcome_text = "Welcome, Admin! You have full access to manage the bot."
+    elif message.from_user.id in counselors:
+        welcome_text = "Welcome, Counselor! You can assist users with their queries."
     else:
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("Start", callback_data="start"))
-        bot.send_message(
-            message.chat.id,
-            "Welcome to the chamo counseling bot.\n\nThis is a safe space to share your struggles, secrets, testimonies, and more anonymously to a community of supportive individuals.\n\nClick on start to begin sharing... ",
-            reply_markup=markup
+        welcome_text = (
+            "Welcome to the Chamo Counseling Bot.\n\n"
+            "This is a safe space to share your struggles, secrets, testimonies, and more anonymously "
+            "to a community of supportive individuals.\n\n"
+            "Click on start to begin sharing..."
         )
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Start", callback_data="start"))
+    bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
         
 # Register a new counselor (admin only)
 @bot.message_handler(commands=['register_counselor'])
@@ -212,13 +215,6 @@ def approve_counselor_change(call):
     else:
         bot.send_message(call.message.chat.id, "No counselors are available for reassignment.")
 
-
-
-@bot.callback_query_handler(func=lambda call: call.data == "start")
-def ask_for_message(call):
-    bot.delete_message(call.message.chat.id, call.message.message_id)  # Delete the start button message
-    msg = bot.send_message(call.message.chat.id, "Send your message.\nYou can send text, photo, video, or voice. OR you can start one to one counseling")
-    bot.register_next_step_handler(msg, receive_message)
 
 def receive_message(message):
     user_data[message.chat.id] = {'message': message}
@@ -379,14 +375,45 @@ def approve_message(call):
         parse_mode='HTML')
 
 
+# Help messages for different roles
+def get_help_message(user_id):
+    if user_id in admins:
+        return (
+            "Admin Help:\n"
+            "- Manage users and sessions.\n"
+            "- Add or remove counselors.\n"
+            "- View active sessions.\n"
+            "- Use /view_counselors to see registered counselors.\n"
+            "- Use /end_session to end a user's session."
+        )
+    elif user_id in counselors:
+        return (
+            "Counselor Help:\n"
+            "- Assist users with their issues.\n"
+            "- Respond to anonymous messages.\n"
+            "- Use /view_sessions to see your active sessions."
+        )
+    else:
+        return (
+            "User Help:\n"
+            "- Send messages anonymously to share your experiences.\n"
+            "- Click 'Start' to begin sharing.\n"
+            "- Your identity remains confidential."
+        )
+
 # Handle start command with reply deep link
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     if len(message.text.split()) > 1 and message.text.split()[1].startswith('reply_'):
         handle_deep_link_reply(message)
     else:
-        bot.send_message(message.chat.id, "Welcome! Send any message, and others can reply to it anonymously.")
+        send_welcome(message)  # Call the new send_welcome function
 
+# Help command handler
+@bot.message_handler(commands=['help'])
+def handle_help(message):
+    help_message = get_help_message(message.from_user.id)
+    bot.send_message(message.chat.id, help_message)
 def handle_deep_link_reply(message):
     try:
         # Extract the message ID from the deep link
