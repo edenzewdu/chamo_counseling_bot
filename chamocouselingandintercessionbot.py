@@ -1,3 +1,6 @@
+from telethon import TelegramClient, events, functions
+from telethon.tl.types import InputPeerChannel
+from telebot import TeleBot
 import telebot
 from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -17,15 +20,20 @@ logging.basicConfig(level=logging.INFO)
 # File to store counselor data
 COUNSELOR_FILE = 'counselors.json'
 SESSION_LOG_DIR = 'sessions'
+api_id = 'YOUR_API_ID'  # Replace with your actual API ID
+api_hash = 'YOUR_API_HASH'  # Replace with your actual API Hash
+# Set up the Telethon client and bot
+client = TelegramClient('session_name', api_id, api_hash, timeout=10)
+bot = telebot.TeleBot(API_TOKEN)
+logging.basicConfig(level=logging.INFO)
+
 
 # Initialize topic IDs (add your topic data as needed)
-topics = {
-    "TOPICS": "TOPICS_ID",  # Placeholder - update as required
-}
+topics = {}
 user_data = {}
 reply_data = {}
 
-# Ensures counselors file and sessions directory exist
+# Ensure counselors file and sessions directory exist
 if not os.path.exists(COUNSELOR_FILE):
     with open(COUNSELOR_FILE, 'w') as f:
         json.dump([], f)
@@ -37,10 +45,20 @@ if not os.path.exists(SESSION_LOG_DIR):
 def load_counselors():
     try:
         with open(COUNSELOR_FILE, 'r') as f:
-            return json.load(f)
+            counselors = json.load(f)
+            # Ensure counselors is a list
+            if not isinstance(counselors, list):
+                logging.error("Counselor data is not in list format, resetting to an empty list.")
+                return []
+            logging.info(f"Loaded counselors: {counselors}")  # Log the loaded counselors
+            return counselors  # Ensure this returns a list
+    except json.JSONDecodeError:
+        logging.error("Failed to decode JSON, resetting counselor data.")
+        return []  # Return an empty list if JSON is invalid
     except Exception as e:
         logging.error(f"Failed to load counselors: {e}")
         return []  # Return an empty list on failure
+
 
 # Helper function to save counselors
 def save_counselors(counselors):
@@ -55,7 +73,7 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("Start", callback_data="start"))
         bot.send_message(
             message.chat.id,
-            "Welcome to the chamo counseling bot.\n\nThis's a safe space to share your struggles, secrets, testimonies and more anonymously to a community of supportive individuals.\n\nClick on start to begin sharing... ",
+            "Welcome to the chamo counseling bot.\n\nThis is a safe space to share your struggles, secrets, testimonies, and more anonymously to a community of supportive individuals.\n\nClick on start to begin sharing... ",
             reply_markup=markup
         )
         
@@ -70,12 +88,14 @@ def register_counselor(message):
     bot.register_next_step_handler(msg, save_counselor)
 
 def save_counselor(message):
-    username = message.text
+    username = message.text.strip()
     counselors = load_counselors()
+
+    # Check if the username already exists
     if any(c['username'] == username for c in counselors):
         bot.reply_to(message, f"Counselor @{username} is already registered.")
     else:
-        counselors.append({"username": username, "assigned": False})
+        counselors.append({"username": username, "assigned": False})  
         save_counselors(counselors)
         bot.reply_to(message, f"Counselor @{username} registered successfully.")
 
@@ -90,11 +110,17 @@ def delete_counselor(message):
     bot.register_next_step_handler(msg, remove_counselor)
 
 def remove_counselor(message):
-    username = message.text
+    username = message.text.strip()  # Get username from the message
     counselors = load_counselors()
-    counselors = [c for c in counselors if c['username'] != username]
-    save_counselors(counselors)
-    bot.reply_to(message, f"Counselor @{username} has been removed.")
+
+    # Check if the username exists in the list
+    if any(c['username'] == username for c in counselors):
+        # Filter out the counselor
+        counselors = [c for c in counselors if c['username'] != username]  
+        save_counselors(counselors)
+        bot.reply_to(message, f"Counselor @{username} has been removed.")
+    else:
+        bot.reply_to(message, f"Counselor @{username} not found.")
 
 # Start a one-on-one counseling session
 @bot.message_handler(commands=['request_counseling'])
@@ -191,7 +217,7 @@ def approve_counselor_change(call):
 @bot.callback_query_handler(func=lambda call: call.data == "start")
 def ask_for_message(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)  # Delete the start button message
-    msg = bot.send_message(call.message.chat.id, "Send your message.\nYou can send text, photo, video, or voice.")
+    msg = bot.send_message(call.message.chat.id, "Send your message.\nYou can send text, photo, video, or voice. OR you can start one to one counseling")
     bot.register_next_step_handler(msg, receive_message)
 
 def receive_message(message):
@@ -445,12 +471,12 @@ def add_admin(admin_id):
 
 
 # Function to dynamically add topics
-def add_topic(name, thread_id):
-    topics[name] = thread_id
-    return f"Topic '{name}' added with thread ID {thread_id}."
+def add_topic(name):
+    if name in topics:
+        return f"Topic '{name}' already exists."
+    topics[name] = True  # Use a simple dictionary to track existence
+    return f"Topic '{name}' added."
 
-
-@bot.message_handler(commands=['add_admin'])
 # Command handlers for adding admins and topics dynamically
 @bot.message_handler(commands=['add_admin'])
 def handle_add_admin(message):
@@ -465,18 +491,55 @@ def handle_add_admin(message):
     bot.reply_to(message, response)
 
 @bot.message_handler(commands=['add_topic'])
-def handle_add_topic(message):
+async def handle_add_topic(message):
     if message.from_user.id in admins:  # Ensure only existing admins can add topics
         try:
             args = message.text.split()
-            name = args[1]
-            thread_id = int(args[2])
-            response = add_topic(name, thread_id)
-        except (IndexError, ValueError):
-            response = "Usage: /add_topic <topic_name> <thread_id>"
+            topic_name = args[1]
+            topic_icon = '💡'  # Example icon (light bulb)
+
+            # Create the topic in the group
+            result = await client(functions.channels.CreateForumTopicRequest(
+                channel=GROUP_CHAT_ID,
+                title=topic_name,
+                icon=topic_icon  # Set the chosen icon here
+            ))
+            
+            # Store the topic name and ID
+            topics[topic_name] = result.id
+            
+            response = f"Topic '{topic_name}' created successfully!"
+        except IndexError:
+            response = "Usage: /add_topic <topic_name>"
+        except Exception as e:
+            response = f"Failed to create topic: {str(e)}"
     else:
-        response = "You Are Not an Admin !!!"
+        response = "You are not an admin!"
+
     bot.reply_to(message, response)
+
+# Command to view all topics
+@bot.message_handler(commands=['view_topics'])
+async def view_topics(message):
+    if message.from_user.id not in admins:
+        bot.reply_to(message, "You are not authorized to perform this action.")
+        return
+
+    if not topics:
+        bot.reply_to(message, "No topics have been added.")
+    else:
+        # Fetch group entity
+        group = await client.get_entity(GROUP_CHAT_ID)
+
+        # Get the group description (topic)
+        description = group.about if group.about else "No description available."
+        
+        # Create a list of topics
+        topic_list = "\n".join(topics.keys())
+        
+        response = f"Group Description: {description}\n\nTopics:\n{topic_list}"
+        bot.reply_to(message, response)
+
 # View all registered counselors
 @bot.message_handler(commands=['view_counselors'])
 def view_counselors(message):
@@ -531,24 +594,5 @@ def confirm_end_session(message):
     
     bot.reply_to(message, f"Ended sessions for @{counselor_username}.")
 
-# Help command
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    if message.from_user.id not in admins:
-        bot.reply_to(message, "You are not authorized to perform this action.")
-        return
-    
-    help_text = (
-        "/register_counselor - Register a new counselor.\n"
-        "/delete_counselor - Delete a registered counselor.\n"
-        "/view_counselors - View all registered counselors.\n"
-        "/view_sessions - View all active sessions.\n"
-        "/end_session - End a session for a specific counselor.\n"
-        "/help - Show this help message."
-    )
-    bot.send_message(message.chat.id, help_text)
-
 # Start polling
 bot.polling()
-
-
