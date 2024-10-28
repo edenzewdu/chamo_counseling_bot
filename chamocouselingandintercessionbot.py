@@ -4,29 +4,22 @@ from telebot import TeleBot
 import telebot
 from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import logging
-import json
-import os
-from datetime import datetime
 
-# Bot setup and token configuration
-API_TOKEN = '7870966451:AAF-KujeDLKCR8k1zTN7Kl1NSvhxraaw2iU'  # Replace with your bot's API token
-GROUP_CHAT_ID = -1002454936996  # Replace with your group chat ID
-admins = [709031839]  # Replace with actual admin IDs
-api_id = '28876058'
-api_hash = '105f9eb8bc22ceb71590be9afb3a1e31'
+# File to store counselor data
+COUNSELOR_FILE = 'counselors.json'
+SESSION_LOG_DIR = 'sessions'
+api_id = 'YOUR_API_ID'  # Replace with your actual API ID
+api_hash = 'YOUR_API_HASH'  # Replace with your actual API Hash
 # Set up the Telethon client and bot
 client = TelegramClient('session_name', api_id, api_hash, timeout=10)
 bot = telebot.TeleBot(API_TOKEN)
 logging.basicConfig(level=logging.INFO)
 
-# File to store counselor data
-COUNSELOR_FILE = 'counselors.json'
-SESSION_LOG_DIR = 'sessions'
-
 # Initialize topic IDs (add your topic data as needed)
+topics = {
+    "TOPICS": "TOPICS_ID",  # Placeholder - update as required
+}
 topics = {}
-
 user_data = {}
 reply_data = {}
 
