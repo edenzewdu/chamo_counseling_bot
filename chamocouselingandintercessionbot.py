@@ -15,11 +15,39 @@ client = TelegramClient('session_name', api_id, api_hash, timeout=10)
 bot = telebot.TeleBot(API_TOKEN)
 logging.basicConfig(level=logging.INFO)
 
-# Initialize topic IDs (add your topic data as needed)
-topics = {
-    "TOPICS": "TOPICS_ID",  # Placeholder - update as required
-}
-topics = {}
+# Fetch messages from a chat
+async def fetch_topics(chat_id):
+    try:
+        async with app:
+            # Retrieve all topics in the group
+            dialogs = await app.get_dialogs()
+            for dialog in dialogs:
+                if dialog.chat.id == chat_id and dialog.is_topic:
+                    topic_id = dialog.id  # The unique ID for each topic
+                    print(f"Topic found: {dialog.title}, ID: {topic_id}")
+
+                    # Fetch messages for each topic
+                    async for message in app.get_chat_history(chat_id, topic_id=topic_id, limit=20):
+                        print(message.text)
+    except errors.PeerIdInvalid:
+        print(f"Invalid peer ID for chat_id: {chat_id}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+async def get_chat_id(group_username):
+    async with app:
+        chat = await app.get_chat(group_username)
+        print(f"Chat ID for '{group_username}' is: {chat.id}")
+
+# Replace 'group_username' with the group's @username or invite link
+your_chat_id = asyncio.run(get_chat_id('group_username'))
+
+
+# Run the main function with asyncio
+topics = asyncio.run(fetch_topics(your_chat_id))
+print(topics)
+
+
 user_data = {}
 reply_data = {}
 
