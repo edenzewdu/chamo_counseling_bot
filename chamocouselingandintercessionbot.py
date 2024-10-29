@@ -35,12 +35,9 @@ async def fetch_topics(chat_id):
         print(f"An error occurred: {e}")
 
 async def get_chat_id(group_username):
-    async with app:
-        chat = await app.get_chat(group_username)
-        print(f"Chat ID for '{group_username}' is: {chat.id}")
-
-# Replace 'group_username' with the group's @username or invite link
-your_chat_id = asyncio.run(get_chat_id('group_username'))
+    chat = await app.get_chat(group_username)
+    print(f"Chat ID for '{group_username}' is: {chat.id}")
+    return chat.id
 
 
 # Run the main function with asyncio
